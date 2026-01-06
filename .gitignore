@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large OCR outputs
+outputs/metrics/
+outputs/text/
+
+# Ignore all viz outputs by default
+outputs/viz/*
+
+# BUT keep selected demo images (negate ignore)
+!outputs/viz/*_ocr_boxes.png
+!outputs/viz/*_ocr_boxes_pre.png
+!outputs/viz/*_pre.png

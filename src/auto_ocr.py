@@ -11,6 +11,12 @@ class Pipeline:
     preprocess_fn: Callable[[np.ndarray], np.ndarray]
     psm: int
 
+    # scale factor used inside preprocessing resize (for box mapping back to original)
+    scale: float = 1.0
+
+    # if preprocessing includes deskew/rotation, mapping boxes back to original is not reliable
+    can_map_to_original: bool = True
+
 def score_words(words: List[Dict]) -> float:
     if not words:
         return -1e9
@@ -40,9 +46,14 @@ def run_auto_ocr(
     *,
     min_mean_conf: float = 15.0,
     min_words: int = 3,
-) -> Tuple[str, np.ndarray, List[Dict], float]:
+) -> Tuple[Pipeline, np.ndarray, List[Dict], float]:
+    """
+    Returns:
+        (best_pipeline, best_preprocessed_img, best_words, best_score)
 
-    best_name = ""
+    If OCR is weak, best_pipeline.name will be suffixed with '__UNRELIABLE'.
+    """
+    best_p = None
     best_pre = None
     best_words: List[Dict] = []
     best_score = -1e18
@@ -51,15 +62,24 @@ def run_auto_ocr(
         pre = p.preprocess_fn(bgr_img)
         words = ocr_words(pre, psm=p.psm)
         s = score_words(words)
-        if s > best_score:
-            best_name, best_pre, best_words, best_score = p.name, pre, words, s
 
+        if s > best_score:
+            best_p, best_pre, best_words, best_score = p, pre, words, s
+
+    # reliability check
     if best_words:
         mean_conf = float(np.mean([w["conf"] for w in best_words]))
     else:
         mean_conf = 0.0
 
     if mean_conf < min_mean_conf or len(best_words) < min_words:
-        best_name = f"{best_name}__UNRELIABLE"
+        # create a shallow "copy" with modified name
+        best_p = Pipeline(
+            name=f"{best_p.name}__UNRELIABLE",
+            preprocess_fn=best_p.preprocess_fn,
+            psm=best_p.psm,
+            scale=best_p.scale,
+            can_map_to_original=best_p.can_map_to_original
+        )
 
-    return best_name, best_pre, best_words, best_score
+    return best_p, best_pre, best_words, best_score

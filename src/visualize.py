@@ -19,5 +19,4 @@ def draw_boxes(bgr_img: np.ndarray, words: List[Dict]) -> np.ndarray:
             1,
             cv2.LINE_AA
         )
-
     return bgr_img

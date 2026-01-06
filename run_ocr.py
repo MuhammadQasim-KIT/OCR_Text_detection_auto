@@ -31,6 +31,20 @@ def ensure_dirs() -> None:
 def list_images(input_dir: Path):
     return sorted([p for p in input_dir.glob("*") if p.suffix.lower() in SUPPORTED_EXTS])
 
+def rescale_words(words, scale: float):
+    """Map word boxes from preprocessed image coordinates back to original image coordinates."""
+    if scale == 1.0:
+        return words
+    out = []
+    for w in words:
+        ww = dict(w)
+        ww["x"] = int(w["x"] / scale)
+        ww["y"] = int(w["y"] / scale)
+        ww["w"] = int(w["w"] / scale)
+        ww["h"] = int(w["h"] / scale)
+        out.append(ww)
+    return out
+
 def main() -> None:
     ensure_dirs()
 
@@ -40,22 +54,23 @@ def main() -> None:
         print("Add at least one image to data/sample_images/ and run again.")
         return
 
+    # IMPORTANT: scale values must match resize factors in preprocess.py
     pipelines = [
         # Tables / newspapers / grids
-        Pipeline("otsu_table_psm6", preprocess_otsu_table, 6),
-        Pipeline("otsu_table_deskew_psm6", preprocess_otsu_table_deskew, 6),
+        Pipeline("otsu_table_psm6", preprocess_otsu_table, 6, scale=2.5, can_map_to_original=True),
+        Pipeline("otsu_table_deskew_psm6", preprocess_otsu_table_deskew, 6, scale=2.5, can_map_to_original=False),
 
         # Clean documents
-        Pipeline("otsu_psm6", preprocess_otsu, 6),
-        Pipeline("otsu_deskew_psm6", preprocess_otsu_deskew, 6),
-        Pipeline("otsu_psm4", preprocess_otsu, 4),
+        Pipeline("otsu_psm6", preprocess_otsu, 6, scale=2.5, can_map_to_original=True),
+        Pipeline("otsu_deskew_psm6", preprocess_otsu_deskew, 6, scale=2.5, can_map_to_original=False),
+        Pipeline("otsu_psm4", preprocess_otsu, 4, scale=2.5, can_map_to_original=True),
 
         # Posters / sparse layouts
-        Pipeline("adapt_psm11", preprocess_adaptive, 11),
-        Pipeline("adapt_deskew_psm11", preprocess_adaptive_deskew, 11),
+        Pipeline("adapt_psm11", preprocess_adaptive, 11, scale=2.0, can_map_to_original=True),
+        Pipeline("adapt_deskew_psm11", preprocess_adaptive_deskew, 11, scale=2.0, can_map_to_original=False),
 
         # Single line attempt
-        Pipeline("adapt_psm7", preprocess_adaptive, 7),
+        Pipeline("adapt_psm7", preprocess_adaptive, 7, scale=2.0, can_map_to_original=True),
     ]
 
     rows = []
@@ -66,28 +81,42 @@ def main() -> None:
             print(f"[WARN] Could not read image: {img_path.name}")
             continue
 
-        best_name, best_pre, words, best_score = run_auto_ocr(img, pipelines)
+        best_p, best_pre, words, best_score = run_auto_ocr(img, pipelines)
 
-        # Save best preprocessed image for debugging
-        cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_{best_name}_pre.png"), best_pre)
+        # 1) Save best preprocessed image for debugging
+        cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_{best_p.name}_pre.png"), best_pre)
 
+        # 2) Always save OCR boxes on the PREPROCESSED image (coordinates always match here)
+        pre_bgr = cv2.cvtColor(best_pre, cv2.COLOR_GRAY2BGR) if len(best_pre.shape) == 2 else best_pre.copy()
+        viz_pre = draw_boxes(pre_bgr, words)
+        cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_ocr_boxes_pre.png"), viz_pre)
+
+        # 3) Save OCR boxes on the ORIGINAL image (only if mapping is valid)
+        if best_p.can_map_to_original:
+            words_for_original = rescale_words(words, best_p.scale)
+            viz_orig = draw_boxes(img.copy(), words_for_original)
+            cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_ocr_boxes.png"), viz_orig)
+        else:
+            # Still write an image so user isn't confused:
+            # we reuse the preprocessed visualization name pattern.
+            cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_ocr_boxes.png"), viz_pre)
+
+        # 4) Save extracted text
         extracted_text = " ".join([w["text"] for w in words if w["text"].strip()])
         (OUT_TEXT / f"{img_path.stem}.txt").write_text(extracted_text, encoding="utf-8")
 
-        viz = draw_boxes(img.copy(), words)
-        cv2.imwrite(str(OUT_VIZ / f"{img_path.stem}_ocr_boxes.png"), viz)
-
+        # 5) Save metrics rows
         for w in words:
             rows.append({
                 "image": img_path.name,
-                "pipeline": best_name,
+                "pipeline": best_p.name,
                 "score": best_score,
                 "text": w["text"],
                 "conf": w["conf"],
                 "x": w["x"], "y": w["y"], "w": w["w"], "h": w["h"],
             })
 
-        print(f"Processed: {img_path.name} | pipeline={best_name} | words_kept={len(words)}")
+        print(f"Processed: {img_path.name} | pipeline={best_p.name} | words_kept={len(words)}")
 
     if rows:
         df = pd.DataFrame(rows)
@@ -97,6 +126,7 @@ def main() -> None:
         print("\nNo OCR words passed the filters (try lowering the confidence threshold in src/ocr.py).")
 
     print(f"Outputs folder: {Path('outputs').resolve()}")
+    print("Note: 'outputs/viz/*_ocr_boxes_pre.png' is always reliable for visualization.")
 
 if __name__ == "__main__":
     main()

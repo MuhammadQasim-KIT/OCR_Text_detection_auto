@@ -46,7 +46,7 @@ def ocr_words(preprocessed_img: np.ndarray, psm: int = 6) -> List[Dict]:
             continue
         if w <= 5 or h <= 5:
             continue
-        if conf < 20:  # tune later if needed
+        if conf < 20:
             continue
 
         results.append({

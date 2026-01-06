@@ -6,11 +6,6 @@ import numpy as np
 # ----------------------------
 
 def _rotate_image_keep_bounds(img: np.ndarray, angle_deg: float, bg: int = 255) -> np.ndarray:
-    """
-    Rotate image by angle_deg while keeping full content in frame.
-    img: single-channel uint8
-    bg: background color (255 for white)
-    """
     (h, w) = img.shape[:2]
     center = (w / 2, h / 2)
 
@@ -28,10 +23,6 @@ def _rotate_image_keep_bounds(img: np.ndarray, angle_deg: float, bg: int = 255) 
 
 
 def deskew_binary(binary: np.ndarray) -> np.ndarray:
-    """
-    Deskew a binary image (text black on white).
-    Uses minAreaRect on foreground pixels to estimate skew.
-    """
     coords = np.column_stack(np.where(binary < 128))
     if coords.size < 200:
         return binary
@@ -51,11 +42,7 @@ def deskew_binary(binary: np.ndarray) -> np.ndarray:
 
 
 def remove_table_lines(binary: np.ndarray) -> np.ndarray:
-    """
-    Remove horizontal/vertical table/grid lines from a binary image.
-    Assumes binary is black text (0) on white (255).
-    """
-    inv = 255 - binary  # text+lines become white
+    inv = 255 - binary
 
     h, w = inv.shape[:2]
     horiz_len = max(20, w // 25)
@@ -71,14 +58,11 @@ def remove_table_lines(binary: np.ndarray) -> np.ndarray:
     vert = cv2.dilate(vert, vert_kernel, iterations=1)
 
     lines = cv2.bitwise_or(horiz, vert)
-
     no_lines = cv2.subtract(inv, lines)
-
-    out = 255 - no_lines  # back to black text on white
+    out = 255 - no_lines
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     out = cv2.morphologyEx(out, cv2.MORPH_OPEN, kernel, iterations=1)
-
     return out
 
 
@@ -87,7 +71,6 @@ def remove_table_lines(binary: np.ndarray) -> np.ndarray:
 # ----------------------------
 
 def preprocess_adaptive(bgr_img: np.ndarray) -> np.ndarray:
-    """Adaptive thresholding: good for uneven lighting, posters."""
     gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     gray = cv2.bilateralFilter(gray, d=7, sigmaColor=50, sigmaSpace=50)
@@ -109,12 +92,10 @@ def preprocess_adaptive(bgr_img: np.ndarray) -> np.ndarray:
 
 
 def preprocess_adaptive_deskew(bgr_img: np.ndarray) -> np.ndarray:
-    thr = preprocess_adaptive(bgr_img)
-    return deskew_binary(thr)
+    return deskew_binary(preprocess_adaptive(bgr_img))
 
 
 def preprocess_otsu(bgr_img: np.ndarray) -> np.ndarray:
-    """Otsu thresholding: good for clean scans, tables, newspapers."""
     gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
     gray = cv2.bilateralFilter(gray, d=7, sigmaColor=50, sigmaSpace=50)
@@ -126,18 +107,15 @@ def preprocess_otsu(bgr_img: np.ndarray) -> np.ndarray:
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     thr = cv2.dilate(thr, kernel, iterations=1)
-
     return thr
 
 
 def preprocess_otsu_deskew(bgr_img: np.ndarray) -> np.ndarray:
-    thr = preprocess_otsu(bgr_img)
-    return deskew_binary(thr)
+    return deskew_binary(preprocess_otsu(bgr_img))
 
 
 def preprocess_otsu_table(bgr_img: np.ndarray) -> np.ndarray:
-    thr = preprocess_otsu(bgr_img)
-    return remove_table_lines(thr)
+    return remove_table_lines(preprocess_otsu(bgr_img))
 
 
 def preprocess_otsu_table_deskew(bgr_img: np.ndarray) -> np.ndarray:
@@ -147,6 +125,5 @@ def preprocess_otsu_table_deskew(bgr_img: np.ndarray) -> np.ndarray:
     return thr
 
 
-# Backwards-compatible alias
 def preprocess_for_ocr(bgr_img: np.ndarray) -> np.ndarray:
     return preprocess_adaptive(bgr_img)
